@@ -11,9 +11,9 @@ ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'Jack', 'Queen', 'King', 
 suits = ['Clovers', 'Diamonds', 'Hearts', 'Spades']
 
 
-def _get_deck():
+def _get_deck(full_deck: bool):
     deck = []
-    for i in range(0, 13):
+    for i in range(0 if full_deck else 7, 13):
         for j in range(4):
             deck.append(Card(suits[j], ranks[i]))
     return deck
@@ -30,7 +30,8 @@ def rotate(l, n):
 
 
 class Kierki:
-    def __init__(self, player1: Player, player2: Player, player3: Player, player4: Player, display=True):
+    def __init__(self, player1: Player, player2: Player, player3: Player, player4: Player, display=True, delay=500, full_deck: bool = True):
+        self.full_deck = full_deck
         self.players = collections.deque([player1, player2, player3, player4])
         self.state = {
             "hands": self._deal(),
@@ -40,27 +41,32 @@ class Kierki:
                 player2: 0,
                 player3: 0,
                 player4: 0
-            }
+            },
+            "old_discards": []
         }
         if display:
-            self.renderer = PygameRenderer(800, 800, 100)
+            self.renderer = PygameRenderer(delay)
         else:
             self.renderer = None
 
-
     def _deal(self) -> dict:
-        deck = _get_deck()
+        deck = _get_deck(self.full_deck)
         shuffle(deck)
         hands = dict(
-            zip(self.players, _chunk(deck, 13))
+            zip(self.players, _chunk(deck, 13 if self.full_deck else 6))
         )
         return hands
 
     def _validate(self, player, move: Card) -> bool:
+        """
+        Validates a move. You can refer to the wikipedia page if this is confusing.
+        """
+
         # obvious
         if move not in self.state["hands"][player]:
             return False
 
+        # the starting player can discard whatever
         if len(self.state["discard"]) == 0:
             return True
 
@@ -86,10 +92,10 @@ class Kierki:
 
     def start(self):
         for _ in range(11):
-            for _ in range(13):
-                self.players.rotate(1)
+            for _ in range(13 if self.full_deck else 6):
                 for player in self.players:
-                    state_copy = {"hand": copy.deepcopy(self.state["hands"][player]), "discard": copy.deepcopy(self.state["discard"])}
+                    state_copy = {"hand": copy.deepcopy(self.state["hands"][player]), "discard": copy.deepcopy(self.state["discard"]),
+                                  "old_discards": [copy.deepcopy(list(game_round.values())) for game_round in self.state["old_discards"]]}
                     move = player.make_move(state_copy)
                     if self._validate(player, move):
                         self.state["hands"][player].remove(move)
@@ -99,10 +105,15 @@ class Kierki:
                     if self.renderer:
                         self.renderer.render(self.state)
                 loser, penalty = self._calc_penalty()
-                self.state["points"][loser] += penalty
 
-                self.state["discard"].clear()
-                if not iter(self.state["hands"].values()).__next__():
-                    self.state["hands"] = self._deal()
+                # the loser starts
+                first = self.players.index(loser)
+                self.players.rotate(-first)
+                self.state["points"][loser] += penalty
+                self.state["old_discards"].append(self.state["discard"])
+
+                self.state["discard"] = {}
+            self.state["hands"] = self._deal()
+            self.state["old_discards"] = []
 
         return self.state["points"]

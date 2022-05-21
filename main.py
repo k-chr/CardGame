@@ -9,8 +9,17 @@ import random
 
 from Kierki import Kierki, Player, Card
 
+player = 1
+
 
 class RandomPlayer(Player):
+    """
+    Makes random moves but according to the rules
+    """
+    def __init__(self):
+        global player
+        self.number = player
+        player += 1
 
     def make_move(self, game_state: dict) -> Card:
         if not game_state["discard"]:
@@ -22,9 +31,12 @@ class RandomPlayer(Player):
             else:
                 return random.choice(game_state["hand"])
 
+    def get_name(self):
+        return f"randomPlayer{self.number}"
+
 
 def main():
-    print(Kierki(RandomPlayer(), RandomPlayer(), RandomPlayer(), RandomPlayer()).start())
+    print(Kierki(RandomPlayer(), RandomPlayer(), RandomPlayer(), RandomPlayer(), delay=100).start())
 
 
 if __name__ == '__main__':

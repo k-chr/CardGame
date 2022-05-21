@@ -7,3 +7,6 @@ class Player(ABC):
     def make_move(self, game_state: dict) -> Card:
         pass
 
+    @abstractmethod
+    def get_name(self) -> str:
+        pass
