@@ -25,12 +25,16 @@ def _chunk(lst, n):
         yield lst[i:i + n]
 
 
-def rotate(l, n):
-    return l[n:] + l[:n]
-
-
 class Kierki:
+    """
+    Black lady game. Requires 4 unique player objects.
+    """
     def __init__(self, player1: Player, player2: Player, player3: Player, player4: Player, display=True, delay=500, full_deck: bool = True):
+        """
+        If display is True, the game will open a pygame window and use the delay argument as the delay between moves.
+        Otherwise, the game will calculate all moves instantly once started.
+        Set the full_deck argument to False to use a smaller deck with cards of rank 9 and above (inclusive).
+        """
         self.full_deck = full_deck
         self.players = collections.deque([player1, player2, player3, player4])
         self.state = {
@@ -78,6 +82,11 @@ class Kierki:
         return True
 
     def _calc_penalty(self) -> tuple[Player, int]:
+        """
+        The penalty for losing a round is:
+        1 point for each card from the hearts suit
+        13 points for the queen of spades
+        """
         first_suit = iter(self.state["discard"].values()).__next__().suit
         possible_losers = list(filter(lambda player_card: player_card[1].suit == first_suit, self.state["discard"].items()))
         possible_losers.sort(key=lambda player_card: ranks.index(player_card[1].rank))
@@ -91,10 +100,13 @@ class Kierki:
         return loser, penalty
 
     def start(self):
+        """
+        Runs the game once (11 deals).
+        """
         for _ in range(11):
             for _ in range(13 if self.full_deck else 6):
                 for player in self.players:
-                    state_copy = {"hand": copy.deepcopy(self.state["hands"][player]), "discard": copy.deepcopy(self.state["discard"]),
+                    state_copy = {"hand": copy.deepcopy(self.state["hands"][player]), "discard": copy.deepcopy(list(self.state["discard"].values())),
                                   "old_discards": [copy.deepcopy(list(game_round.values())) for game_round in self.state["old_discards"]]}
                     move = player.make_move(state_copy)
                     if self._validate(player, move):
@@ -115,5 +127,6 @@ class Kierki:
                 self.state["discard"] = {}
             self.state["hands"] = self._deal()
             self.state["old_discards"] = []
-
-        return self.state["points"]
+        points = self.state["points"]
+        self.state["points"] = {player: 0 for player in self.state["points"].keys()}
+        return points
