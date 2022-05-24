@@ -16,3 +16,20 @@ class Player(ABC):
     @abstractmethod
     def get_name(self) -> str:
         pass
+
+    @abstractmethod
+    def set_temp_reward(self, discarded_cards: dict, point_deltas: dict):
+        """
+        After four cards get played, every player will receive a dict with:
+        - 'discarded_cards': dict of these discarded cards by each player (ordered!)
+        - 'point_deltas': dict of points received in this round by each player
+        """
+        pass
+
+    @abstractmethod
+    def set_final_reward(self, points: dict):
+        """
+        After all cards have been played, every player will receive a dict with
+        points received in this round by each player. A game consists of eleven such full rounds.
+        """
+        pass

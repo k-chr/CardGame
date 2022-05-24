@@ -29,7 +29,9 @@ class Kierki:
     """
     Black lady game. Requires 4 unique player objects.
     """
-    def __init__(self, player1: Player, player2: Player, player3: Player, player4: Player, display=True, delay=500, full_deck: bool = True):
+
+    def __init__(self, player1: Player, player2: Player, player3: Player, player4: Player, display=True, delay=500,
+                 full_deck: bool = True):
         """
         If display is True, the game will open a pygame window and use the delay argument as the delay between moves.
         Otherwise, the game will calculate all moves instantly once started.
@@ -76,7 +78,8 @@ class Kierki:
 
         # if the suit is not the same as the suit of the first card and the player could provide it
         if move.suit != iter(self.state["discard"].values()).__next__().suit and \
-                list(filter(lambda card: card.suit == iter(self.state["discard"].values()).__next__().suit, self.state["hands"][player])):
+                list(filter(lambda card: card.suit == iter(self.state["discard"].values()).__next__().suit,
+                            self.state["hands"][player])):
             return False
 
         return True
@@ -88,7 +91,8 @@ class Kierki:
         13 points for the queen of spades
         """
         first_suit = iter(self.state["discard"].values()).__next__().suit
-        possible_losers = list(filter(lambda player_card: player_card[1].suit == first_suit, self.state["discard"].items()))
+        possible_losers = list(
+            filter(lambda player_card: player_card[1].suit == first_suit, self.state["discard"].items()))
         possible_losers.sort(key=lambda player_card: ranks.index(player_card[1].rank))
         loser = possible_losers[-1][0]
         penalty = 0
@@ -104,10 +108,12 @@ class Kierki:
         Runs the game once (11 deals).
         """
         for _ in range(11):
+            points_old = self.state["points"].copy()
             for _ in range(13 if self.full_deck else 6):
                 for player in self.players:
-                    state_copy = {"hand": copy.deepcopy(self.state["hands"][player]), "discard": copy.deepcopy(list(self.state["discard"].values())),
-                                  "old_discards": [copy.deepcopy(list(game_round.values())) for game_round in self.state["old_discards"]]}
+
+                    state_copy = {"hand": copy.deepcopy(self.state["hands"][player]),
+                                  "discard": copy.deepcopy(list(self.state["discard"].values()))}
                     move = player.make_move(state_copy)
                     if self._validate(player, move):
                         self.state["hands"][player].remove(move)
@@ -118,15 +124,24 @@ class Kierki:
                         self.renderer.render(self.state)
                 loser, penalty = self._calc_penalty()
 
+                for player in self.players:
+                    temp_reward = {player: 0 for player in self.players} | {loser: penalty}
+                    discards = {player: self.state["discard"][player] for player in self.players}
+                    player.set_temp_reward(
+                        discards,
+                        temp_reward
+                    )
+
                 # the loser starts
                 first = self.players.index(loser)
                 self.players.rotate(-first)
                 self.state["points"][loser] += penalty
-                self.state["old_discards"].append(self.state["discard"])
 
                 self.state["discard"] = {}
             self.state["hands"] = self._deal()
-            self.state["old_discards"] = []
+            for player in self.players:
+                points = {player: self.state["points"][player] - points_old[player] for player in self.players}
+                player.set_final_reward(points)
         points = self.state["points"]
         self.state["points"] = {player: 0 for player in self.state["points"].keys()}
         return points

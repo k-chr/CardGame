@@ -34,6 +34,12 @@ class RandomPlayer(Player):
     def get_name(self):
         return f"RandomPlayer{self.number}"
 
+    def set_temp_reward(self, discarded_cards: dict, point_deltas: dict):
+        pass
+
+    def set_final_reward(self, points: dict):
+        pass
+
 
 def main():
     game = Kierki(RandomPlayer(), RandomPlayer(), RandomPlayer(), RandomPlayer(), delay=100, display=False)
