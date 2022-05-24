@@ -3,7 +3,6 @@ import itertools
 import pygame
 import os
 from .card import Card
-from .player import Player
 from pathlib import Path
 
 filename_codes = {'2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'Jack': 11, 'Queen': 12,
@@ -14,6 +13,7 @@ def card_image(card: Card):
     return f"card_{filename_codes[card.rank]}_{card.suit[:-1]}".lower()
 
 
+from .player import Player
 class PygameRenderer:
     def __init__(self, delay):
         width = 800
