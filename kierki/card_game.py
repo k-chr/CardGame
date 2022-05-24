@@ -25,9 +25,9 @@ def _chunk(lst, n):
         yield lst[i:i + n]
 
 
-class Kierki:
+class CardGame:
     """
-    Black lady game. Requires 4 unique player objects.
+    A card game. Requires 4 unique player objects.
     """
 
     def __init__(self, player1: Player, player2: Player, player3: Player, player4: Player, display=True, delay=500,

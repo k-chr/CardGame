@@ -7,7 +7,7 @@
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
 import random
 
-from kierki import Kierki, Player, Card
+from kierki import CardGame, Player, Card
 
 player = 1
 
@@ -42,7 +42,7 @@ class RandomPlayer(Player):
 
 
 def main():
-    game = Kierki(RandomPlayer(), RandomPlayer(), RandomPlayer(), RandomPlayer(), delay=100, display=False)
+    game = CardGame(RandomPlayer(), RandomPlayer(), RandomPlayer(), RandomPlayer(), delay=100, display=False)
     print(game.start())
     print(game.start())
 
