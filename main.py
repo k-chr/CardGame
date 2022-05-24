@@ -7,7 +7,7 @@
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
 import random
 
-from kierki import CardGame, Player, Card
+from card_game import CardGame, Player, Card
 
 player = 1
 
