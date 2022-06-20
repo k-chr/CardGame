@@ -10,5 +10,15 @@ class Agent(Player, ABC):
 		self.gamma = gamma
 		self.action_getter = legal_actions_getter
 		self.rng = rng
+		
   
+	@abstractmethod
+	def get_action(self, state: Any): ...
+	
+	@abstractmethod
+	def get_best_action(self, state: Any): ...
+ 
+	def make_move(self, game_state: dict, was_previous_move_wrong: bool) -> Card:
+		action = self.get_action(game_state)
+		return game_state['hand'][action]
 	
