@@ -114,12 +114,14 @@ class CardGame:
 
                     state_copy = {"hand": copy.deepcopy(self.state["hands"][player]),
                                   "discard": copy.deepcopy(list(self.state["discard"].values()))}
-                    move = player.make_move(state_copy)
-                    if self._validate(player, move):
-                        self.state["hands"][player].remove(move)
-                        self.state["discard"][player] = move
-                    else:
-                        raise Exception("Invalid move")
+                    first_try = True
+                    while True:
+                        move = player.make_move(state_copy, not first_try)
+                        if self._validate(player, move):
+                            break
+                        first_try = False
+                    self.state["hands"][player].remove(move)
+                    self.state["discard"][player] = move
                     if self.renderer:
                         self.renderer.render(self.state)
                 loser, penalty = self._calc_penalty()
