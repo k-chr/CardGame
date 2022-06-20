@@ -4,7 +4,7 @@ from .card import Card
 
 class Player(ABC):
     @abstractmethod
-    def make_move(self, game_state: dict) -> Card:
+    def make_move(self, game_state: dict, was_previous_move_wrong: bool) -> Card:
         """
         The player will receive a dict with:
         - 'hand': list of held cards

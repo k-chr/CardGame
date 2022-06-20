@@ -21,7 +21,7 @@ class RandomPlayer(Player):
         self.number = player
         player += 1
 
-    def make_move(self, game_state: dict) -> Card:
+    def make_move(self, game_state: dict, was_previous_move_wrong: bool) -> Card:
         if not game_state["discard"]:
             return random.choice(game_state["hand"])
         else:
