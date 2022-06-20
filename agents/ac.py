@@ -9,7 +9,7 @@ from . import Agent
 
 class ACAgent(nn.Module, Agent):
 	def __init__(self,
-				 action_size,
+				 full_deck,
 				 state_size,
 				 actor_learning_rate,
 				 critic_learning_rate,
@@ -29,16 +29,16 @@ class ACAgent(nn.Module, Agent):
 				 initializer_params: Dict[str, Any] = {}):
      
 		nn.Module.__init__(self)
-		Agent.__init__(self, (actor_learning_rate, critic_learning_rate), 0.0, gamma, legal_actions_getter, rng)
+		Agent.__init__(self, full_deck, (actor_learning_rate, critic_learning_rate), 0.0, gamma, legal_actions_getter, rng)
   
 		self.parser = parser
 		self.state_size = state_size
-		self.action_size = action_size
+		self.action_size = 13 if full_deck else 6
 		self.loss_decay = loss_decay
 		activations_actor = [activation] * (len(actor_layers))
 		activations_actor.append('')
 		actor_layers: List[int] = [state_size] + actor_layers
-		actor_layers.append(action_size)
+		actor_layers.append(self.action_size)
   
 		activations_critic = [activation] * (len(critic_layers))
 		activations_critic.append('')
@@ -80,6 +80,9 @@ class ACAgent(nn.Module, Agent):
 	def forward(self, state:t.Tensor):
 		return self.actor(state.to(self.learning_device)), self.critic(state.to(self.learning_device))
 	
+	def get_name(self) -> str:
+		return super().get_name() + " - Actor-Critic"
+ 
 	def get_best_action(self, state):
 		raw_state = state
 		state: t.Tensor =self.parser.parse(state)

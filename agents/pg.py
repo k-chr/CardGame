@@ -9,7 +9,7 @@ from . import Agent
 
 class REINFORCEAgent(nn.Module, Agent):
 	def __init__(self, 
-				 action_size,
+				 full_deck,
 			  	 state_size, 
 				 learning_rate,
 				 legal_actions_getter: Callable[[Any], List[Any]],
@@ -26,10 +26,10 @@ class REINFORCEAgent(nn.Module, Agent):
 				 initializer_params: Dict[str, Any] = {}):
 	 
 		nn.Module.__init__(self)
-		Agent.__init__(self, learning_rate, 0.0, gamma, legal_actions_getter, rng)
+		Agent.__init__(self, full_deck, learning_rate, 0.0, gamma, legal_actions_getter, rng)
 		self.parser = parser
 		self.state_size = state_size
-		self.action_size = action_size
+		self.action_size = 13 if full_deck else 6
 		self.rollouts = Memory[Trajectory](None, Trajectory)
 		self.memory = Memory[Trajectory](queue_size, Trajectory) if importance_weighting else None 
 		self.last_prob: float = 0.0
@@ -43,7 +43,7 @@ class REINFORCEAgent(nn.Module, Agent):
 		activations.append('')
   
 		layers: List[int] = [state_size] + layers
-		layers.append(action_size)
+		layers.append(self.action_size)
   
 		self.qnet = nn.Sequential(*[
 	 		layer_init(_in, _out, _activation) for _in, _out, _activation in zip(layers[:-1], layers[1:], activations)
@@ -69,6 +69,9 @@ class REINFORCEAgent(nn.Module, Agent):
 	
 	def forward(self, state):
 		return self.qnet(state.to(self.learning_device))
+
+	def get_name(self) -> str:
+		return super().get_name() + " - REINFORCE"
  
 	def get_action(self, state):
 		"""

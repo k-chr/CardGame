@@ -5,7 +5,10 @@ import numpy as np
 from collections import deque
 from operator import itemgetter
 from abc import abstractmethod, ABCMeta
-from ..card_game import CardGame
+from ..card_game import CardGame, ranks, suits, Card
+
+small_deck = [Card(suits[j], ranks[i]) for i in range(7, 13) for j in range(4)]
+full_deck = [Card(suits[j], ranks[i]) for i in range(0, 13) for j in range(4)]
 
 class Trajectory(NamedTuple):
 	state: Union[t.Tensor, List[t.Tensor]]
