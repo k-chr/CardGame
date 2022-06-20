@@ -3,5 +3,7 @@ jupyter
 ipykernel
 ipython
 numpy
+tqdm
 sklearn
-torch==1.10.1+cu112
+-f https://download.pytorch.org/whl/cu113/torch_stable.html
+torch==1.10.1+cu113
