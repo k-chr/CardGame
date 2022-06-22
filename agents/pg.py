@@ -9,10 +9,9 @@ from numpy.random._generator import Generator, default_rng
 
 class REINFORCEAgent(nn.Module, Agent):
 	def __init__(self, 
+				 batch_size: int,
 				 full_deck,
-			  	 state_size, 
 				 learning_rate,
-    			 parser: StateParser = HeartsStateParser,
 				 gamma = 0.95,
 				 importance_weighting = False,
 				 queue_size = 2000,
@@ -26,9 +25,13 @@ class REINFORCEAgent(nn.Module, Agent):
 	 
 		nn.Module.__init__(self)
 		Agent.__init__(self, full_deck, learning_rate, 0.0, gamma, rng)
+		parser = HeartsStateParser(full_deck)
+		self.batch_size = batch_size
+		state_size = parser.state_len
+		self.losses = []
 		self.parser = parser
 		self.state_size = state_size
-		self.action_size = 13 if full_deck else 6
+		self.action_size = 13 * 4 if full_deck else 6 * 4
 		self.rollouts = Memory[Trajectory](None, Trajectory)
 		self.memory = Memory[Trajectory](queue_size, Trajectory) if importance_weighting else None 
 		self.last_prob: float = 0.0
@@ -40,7 +43,7 @@ class REINFORCEAgent(nn.Module, Agent):
   
 		activations = [activation] * (len(layers))
 		activations.append('')
-  
+		print(state_size, self.action_size)
 		layers: List[int] = [state_size] + layers
 		layers.append(self.action_size)
   
@@ -60,7 +63,17 @@ class REINFORCEAgent(nn.Module, Agent):
 		self.learning_device = "cuda" if t.cuda.is_available() else 'cpu'
 		self.eval_device = 'cpu'
 		self = self.to(self.learning_device)
-		
+  
+	def set_temp_reward(self, discarded_cards: dict, point_deltas: dict):	
+		super().set_temp_reward(discarded_cards, point_deltas)
+		self.remember(self.parser.parse(self.previous_state), self.previous_action, -self.current_reward)
+	
+	def set_final_reward(self, points: dict):
+		super().set_final_reward(points)
+		# TODO sth with points in total.
+  
+		self.losses.append(self.replay())
+	
 	def remember(self, state, action, reward):
 		if not isinstance(state, t.Tensor): state= self.parser.parse(state)
 		#Function adds information to the memory about last action and its results
@@ -92,7 +105,8 @@ class REINFORCEAgent(nn.Module, Agent):
 			self.eval()
 			logits: t.Tensor = self(state).cpu().squeeze(0)
 			probs: t.Tensor = t.softmax(logits, dim=0)
-		probs_gathered: np.ndarray = probs.gather(0, t.as_tensor(possible_actions)).numpy().flatten() +1e-8
+		possible_actions = list(possible_actions)
+		probs_gathered: np.ndarray = probs.gather(0, t.as_tensor((possible_actions))).numpy().flatten() +1e-8
 		probs_gathered = probs_gathered/probs_gathered.sum()
 		action = self.rng.choice(possible_actions, p=probs_gathered)
 		self.last_prob = probs[action].item()
@@ -106,6 +120,8 @@ class REINFORCEAgent(nn.Module, Agent):
 		if invalid_actions:
 			possible_actions -= set(invalid_actions)
 
+		possible_actions = list(possible_actions)
+
 		with t.no_grad():
 			self.eval()
 			logits: t.Tensor = self(state).cpu().squeeze(0).gather(0, t.as_tensor(possible_actions))
@@ -118,7 +134,7 @@ class REINFORCEAgent(nn.Module, Agent):
 
 		return action
 
-	def replay(self, batch_size):
+	def replay(self):
 		"""
 		Function learn network using data stored in state, action and reward memory. 
 		First calculates G_t for each state and train network
@@ -127,7 +143,7 @@ class REINFORCEAgent(nn.Module, Agent):
 		# INSERT CODE HERE to train network
 		#
 		
-		
+		batch_size = self.batch_size
 		trajectories = self.rollouts.get(list(range(len(self.rollouts))))
 		rewards = cumulative_rewards(self.gamma, trajectories.reward)
 		trajectories = Trajectory(trajectories.state, trajectories.action,  tuple(rewards), trajectories.prob)
@@ -140,8 +156,8 @@ class REINFORCEAgent(nn.Module, Agent):
 		if count_mem < batch_size: return None
 		
 		batch = mem.sample(count_mem)
-			
-		states = t.cat(batch.state).to(self.learning_device)
+		print(batch.state[0].__len__())	
+		states = t.stack(batch.state).to(self.learning_device)
 		actions = t.as_tensor(batch.action, dtype=t.int64, device=self.learning_device).unsqueeze(1)
 		rewards = t.as_tensor(batch.reward, device=self.learning_device).unsqueeze(1)
 		probs = t.as_tensor(batch.prob, device=self.learning_device).unsqueeze(1)

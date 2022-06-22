@@ -147,3 +147,4 @@ class CardGame:
         points = self.state["points"]
         self.state["points"] = {player: 0 for player in self.state["points"].keys()}
         return points
+    

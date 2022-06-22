@@ -1,11 +1,13 @@
 from typing import Any, List, Callable, Dict, NamedTuple, Type, Union, Generic, TypeVar, Deque
 import torch as t
-from . import Agent
 import numpy as np
 from collections import deque
 from operator import itemgetter
 from abc import abstractmethod, ABCMeta
-from ..card_game import CardGame, ranks, suits, Card
+from card_game import CardGame, Card
+
+ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'Jack', 'Queen', 'King', 'Ace']
+suits = ['Clovers', 'Diamonds', 'Hearts', 'Spades']
 
 small_deck = [Card(suits[j], ranks[i]) for i in range(7, 13) for j in range(4)]
 full_deck = [Card(suits[j], ranks[i]) for i in range(0, 13) for j in range(4)]
@@ -16,7 +18,7 @@ class Trajectory(NamedTuple):
 	reward: Union[float, List[float]]
 	prob: Union[float, List[float]]
 	
-def get_legal_actions(game: CardGame, agent: Agent, state):
+def get_legal_actions(game: CardGame, agent, state):
     hand = state['hand']
     legit_hand = [card for card in hand if game._CardGame_validate(agent, card)]
     return legit_hand
@@ -86,13 +88,30 @@ class StateParser(metaclass=ABCMeta):
  
 class HeartsStateParser(StateParser):
     
-	def __init__(self, full_deck: bool =False) -> None:
+	def __init__(self, is_full_deck: bool =False) -> None:
+		self.deck_size = 52 if is_full_deck else 24
+		self.deck = full_deck if is_full_deck else small_deck
 		super().__init__()
   
 	def _state_len(self) -> int:
-		return super()._state_len()
+		return self.deck_size * 3
 
 	def _parse(self, state) -> t.Tensor:
-		hand = state['hand']
-		discard = state['discard']
-		return super()._parse(state)
+		hand: List[Card] = state['hand']
+		discard: List[Card] = state['discard']
+		played: List[Card] = state['played_cards']
+
+		h_vec = t.zeros(self.deck_size)
+		d_vec = t.zeros(self.deck_size)
+		p_vec = t.zeros(self.deck_size)
+
+		for h in hand:
+			h_vec[self.deck.index(h)] = 1
+   
+		for d in discard:
+			d_vec[self.deck.index(d)] = 1
+   
+		for p in played:
+			p_vec[self.deck.index(p)] = 1
+		
+		return t.concat([h_vec, d_vec, p_vec], dim=0)
