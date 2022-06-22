@@ -1,24 +1,23 @@
 from torch import nn
 import torch as t
 import numpy as np
-from typing import Callable, List, Any, Dict
+from typing import List, Any, Dict, Optional
 from .utils import HeartsStateParser, Memory, Trajectory, StateParser, cumulative_rewards
 from .training_helpers import Optimizers, Initializers, Activations
 from . import Agent
-
+from numpy.random._generator import Generator, default_rng
 
 class REINFORCEAgent(nn.Module, Agent):
 	def __init__(self, 
 				 full_deck,
 			  	 state_size, 
 				 learning_rate,
-				 legal_actions_getter: Callable[[Any], List[Any]],
     			 parser: StateParser = HeartsStateParser,
 				 gamma = 0.95,
 				 importance_weighting = False,
 				 queue_size = 2000,
 				 layers: List[int] =[],
-				 rng: np.random.Generator =np.random.default_rng(2137),
+				 rng: Generator =default_rng(2137),
 				 optimizer='adam',
 				 optimizer_params: Dict[str, Any] = {},
 				 activation='relu',
@@ -26,7 +25,7 @@ class REINFORCEAgent(nn.Module, Agent):
 				 initializer_params: Dict[str, Any] = {}):
 	 
 		nn.Module.__init__(self)
-		Agent.__init__(self, full_deck, learning_rate, 0.0, gamma, legal_actions_getter, rng)
+		Agent.__init__(self, full_deck, learning_rate, 0.0, gamma, rng)
 		self.parser = parser
 		self.state_size = state_size
 		self.action_size = 13 if full_deck else 6
@@ -73,7 +72,7 @@ class REINFORCEAgent(nn.Module, Agent):
 	def get_name(self) -> str:
 		return super().get_name() + " - REINFORCE"
  
-	def get_action(self, state):
+	def get_action(self, state, invalid_actions: Optional[List[int]] = None):
 		"""
 		Compute the action to take in the current state, basing on policy returned by the network.
 
@@ -83,9 +82,12 @@ class REINFORCEAgent(nn.Module, Agent):
 		#
 		# INSERT CODE HERE to get action in a given state
 		# 
-		raw_state = state
 		state: t.Tensor =self.parser.parse(state)
-		possible_actions = self.get_legal_actions(raw_state)
+		possible_actions = set(range(0, self.action_size))
+  
+		if invalid_actions:
+			possible_actions -= set(invalid_actions)
+
 		with t.no_grad():
 			self.eval()
 			logits: t.Tensor = self(state).cpu().squeeze(0)
@@ -97,10 +99,13 @@ class REINFORCEAgent(nn.Module, Agent):
 		
 		return action
 
-	def get_best_action(self, state):
-		raw_state = state
+	def get_best_action(self, state, invalid_actions: Optional[List[int]] = None):
 		state: t.Tensor =self.parser.parse(state)
-		possible_actions = self.get_legal_actions(raw_state)
+		possible_actions = set(range(0, self.action_size))
+  
+		if invalid_actions:
+			possible_actions -= set(invalid_actions)
+
 		with t.no_grad():
 			self.eval()
 			logits: t.Tensor = self(state).cpu().squeeze(0).gather(0, t.as_tensor(possible_actions))

@@ -1,10 +1,11 @@
 from torch import nn
 import torch as t
 import numpy as np
-from typing import Callable, List, Any, Dict
+from typing import List, Any, Dict, Optional
 from .training_helpers import Optimizers, Initializers, Activations
 from .utils import StateParser, HeartsStateParser
 from torch.nn import functional as F
+from numpy.random._generator import Generator, default_rng
 from . import Agent
 
 class ACAgent(nn.Module, Agent):
@@ -13,13 +14,12 @@ class ACAgent(nn.Module, Agent):
 				 state_size,
 				 actor_learning_rate,
 				 critic_learning_rate,
-				 legal_actions_getter: Callable[[Any], List[Any]],
 				 parser: StateParser =HeartsStateParser(),
 				 gamma=0.99,
 				 loss_decay = 0.99995,
 				 critic_layers: List[int]=[],
 				 actor_layers: List[int]=[],
-				 rng: np.random.Generator =np.random.default_rng(2137),
+				 rng: Generator =default_rng(2137),
 				 actor_optimizer='adam',
 				 critic_optimizer='adam',
 				 actor_optimizer_params: Dict[str, Any] = {},
@@ -29,7 +29,7 @@ class ACAgent(nn.Module, Agent):
 				 initializer_params: Dict[str, Any] = {}):
      
 		nn.Module.__init__(self)
-		Agent.__init__(self, full_deck, (actor_learning_rate, critic_learning_rate), 0.0, gamma, legal_actions_getter, rng)
+		Agent.__init__(self, full_deck, (actor_learning_rate, critic_learning_rate), 0.0, gamma, rng)
   
 		self.parser = parser
 		self.state_size = state_size
@@ -83,10 +83,12 @@ class ACAgent(nn.Module, Agent):
 	def get_name(self) -> str:
 		return super().get_name() + " - Actor-Critic"
  
-	def get_best_action(self, state):
-		raw_state = state
+	def get_best_action(self, state, invalid_actions: Optional[List[int]] =None):
 		state: t.Tensor =self.parser.parse(state)
-		possible_actions = self.get_legal_actions(raw_state)
+		possible_actions = set(range(0, self.action_size))
+  
+		if invalid_actions: possible_actions -= set(invalid_actions)
+  
 		with t.no_grad():
 			self.eval()
 			logits: t.Tensor = self(state)[0].cpu().squeeze(0).gather(0, t.as_tensor(possible_actions))
@@ -99,7 +101,7 @@ class ACAgent(nn.Module, Agent):
 
 		return action
 	
-	def get_action(self, state: Any):
+	def get_action(self, state: Any, invalid_actions: Optional[List[int]] =None):
 		"""
 		Compute the action to take in the current state, basing on policy returned by the network.
 
@@ -112,7 +114,9 @@ class ACAgent(nn.Module, Agent):
 		logits: t.Tensor
 		raw_state = state
 		state: t.Tensor =self.parser.parse(state)
-		possible_actions = self.get_legal_actions(raw_state)
+		possible_actions = possible_actions = set(range(0, self.action_size))
+  
+		if invalid_actions: possible_actions -= set(invalid_actions)
 
 		with t.no_grad():
 			self.eval()
@@ -161,4 +165,3 @@ class ACAgent(nn.Module, Agent):
 		self.critic_optimizer.step()
 		self.I *= self.loss_decay
 		return -actor_loss.detach().item(), critic_loss.detach().item()
-
