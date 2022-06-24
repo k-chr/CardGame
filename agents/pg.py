@@ -71,9 +71,11 @@ class REINFORCEAgent(nn.Module, Agent):
 	def set_final_reward(self, points: dict):
 		super().set_final_reward(points)
 		# TODO sth with points in total.
-  
-		self.losses.append(self.replay())
+		loss = self.replay()
+		self.losses.append(loss)
+		self.loss_callback(loss)
 	
+ 
 	def remember(self, state, action, reward):
 		if not isinstance(state, t.Tensor): state= self.parser.parse(state)
 		#Function adds information to the memory about last action and its results
@@ -84,6 +86,15 @@ class REINFORCEAgent(nn.Module, Agent):
 
 	def get_name(self) -> str:
 		return super().get_name() + " - REINFORCE"
+	
+	def make_move(self, game_state: dict, was_previous_move_wrong: bool):
+		last_prob = self.last_prob
+		act = super().make_move(game_state, was_previous_move_wrong)
+
+		if was_previous_move_wrong:
+			self.rollouts.store(Trajectory(self.parser.parse(game_state), self.invalid_actions[-1], -50, last_prob))
+	
+		return act
  
 	def get_action(self, state, invalid_actions: Optional[List[int]] = None):
 		"""
@@ -153,10 +164,10 @@ class REINFORCEAgent(nn.Module, Agent):
 				self.memory.store(tup)
 		mem = self.memory if self.importance_weighting else self.rollouts
 		count_mem = len(mem)
-		if count_mem < batch_size: return None
 		
-		batch = mem.sample(count_mem)
-		print(batch.state[0].__len__())	
+		batch_size = min(count_mem, batch_size)
+		
+		batch = mem.sample(batch_size)
 		states = t.stack(batch.state).to(self.learning_device)
 		actions = t.as_tensor(batch.action, dtype=t.int64, device=self.learning_device).unsqueeze(1)
 		rewards = t.as_tensor(batch.reward, device=self.learning_device).unsqueeze(1)

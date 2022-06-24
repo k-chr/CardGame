@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Callable, Any, List, Optional
 from numpy.random._generator import default_rng, Generator
 from .utils import small_deck, full_deck
-
+import torch as t
 
 class Agent(Player, ABC):
 	def __init__(self, full_deck: bool, alpha: float, epsilon: float, gamma: float, rng: Generator =default_rng(2137)):
@@ -15,15 +15,20 @@ class Agent(Player, ABC):
 		self.previous_action: int = -1
 		self.current_reward: int = 0 
 		self.previous_state: dict = -1
+		self.invalid_actions_per_episode: List[int] = []
+		self.cummulative_invalid_actions: int =0
 		self.invalid_actions: List[int] =[]
 		self.discarded_cards_so_far: List[Card] =[]
 		self.rng = rng
-  
+		self.loss_callback: Callable[[float], None] = None
 		self.training = True
 
 	def toggle_training(self, value: bool): 
 		self.training = value
 		
+	def set_loss_callback(self, fn: Callable[[float], None]):
+		self.loss_callback = fn
+
 	@abstractmethod
 	def get_action(self, state: Any, invalid_actions: Optional[List[int]] = None): ...
 	
@@ -35,6 +40,8 @@ class Agent(Player, ABC):
  
 	def set_final_reward(self, points: dict):
 		self.discarded_cards_so_far.clear()
+		self.invalid_actions_per_episode.append(self.cummulative_invalid_actions)
+		self.cummulative_invalid_actions = 0
 		return super().set_final_reward(points)
 
 	def set_temp_reward(self, discarded_cards: dict, point_deltas: dict):
@@ -47,7 +54,9 @@ class Agent(Player, ABC):
 	def make_move(self, game_state: dict, was_previous_move_wrong: bool) -> Card:
 		if was_previous_move_wrong:
 			self.invalid_actions.append(self.previous_action)
+			
 		else:
+			self.cummulative_invalid_actions += self.invalid_actions.__len__()
 			self.invalid_actions.clear()
 		self.previous_state = game_state
 		game_state["played_cards"] = deepcopy(self.discarded_cards_so_far)
