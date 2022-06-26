@@ -14,7 +14,7 @@ class Agent(Player, ABC):
 		self.full_deck = full_deck
 		self.previous_action: int = -1
 		self.current_reward: int = 0 
-		self.previous_state: dict = -1
+		self.previous_state: dict = None
 		self.invalid_actions_per_episode: List[int] = []
 		self.cummulative_invalid_actions: int =0
 		self.invalid_actions: List[int] =[]
@@ -58,10 +58,10 @@ class Agent(Player, ABC):
 		else:
 			self.cummulative_invalid_actions += self.invalid_actions.__len__()
 			self.invalid_actions.clear()
-		self.previous_state = game_state
 		game_state["played_cards"] = deepcopy(self.discarded_cards_so_far)
 		action_getter = self.get_action if self.training else self.get_best_action
 		action = action_getter(game_state, self.invalid_actions)
+		self.previous_state = game_state
 		self.previous_action = action
 		return small_deck[action] if not self.full_deck else full_deck[action]
 

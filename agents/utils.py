@@ -88,11 +88,16 @@ class StateParser(metaclass=ABCMeta):
  
 class HeartsStateParser(StateParser):
     
+    
 	def __init__(self, is_full_deck: bool =False) -> None:
 		self.deck_size = 52 if is_full_deck else 24
 		self.deck = full_deck if is_full_deck else small_deck
+		self.__fixed_terminal_state = t.concat([t.zeros(self.deck_size), t.zeros(self.deck_size), t.ones(self.deck_size)], dim=0).unsqueeze(0)
 		super().__init__()
   
+	def fixed_terminal_state(self):
+		return self.__fixed_terminal_state
+	
 	def _state_len(self) -> int:
 		return self.deck_size * 3
 
@@ -114,4 +119,4 @@ class HeartsStateParser(StateParser):
 		for p in played:
 			p_vec[self.deck.index(p)] = 1
 		
-		return t.concat([h_vec, d_vec, p_vec], dim=0)
+		return t.concat([h_vec, d_vec, p_vec], dim=0).unsqueeze(0)

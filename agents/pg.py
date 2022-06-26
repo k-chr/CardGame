@@ -66,11 +66,14 @@ class REINFORCEAgent(nn.Module, Agent):
   
 	def set_temp_reward(self, discarded_cards: dict, point_deltas: dict):	
 		super().set_temp_reward(discarded_cards, point_deltas)
+		if not self.training: return
+  
 		self.remember(self.parser.parse(self.previous_state), self.previous_action, -self.current_reward)
 	
 	def set_final_reward(self, points: dict):
 		super().set_final_reward(points)
 		# TODO sth with points in total.
+		if not self.training: return
 		loss = self.replay()
 		self.losses.append(loss)
 		self.loss_callback(loss)
@@ -89,11 +92,12 @@ class REINFORCEAgent(nn.Module, Agent):
 	
 	def make_move(self, game_state: dict, was_previous_move_wrong: bool):
 		last_prob = self.last_prob
-		act = super().make_move(game_state, was_previous_move_wrong)
+		
 
-		if was_previous_move_wrong:
-			self.rollouts.store(Trajectory(self.parser.parse(game_state), self.invalid_actions[-1], -50, last_prob))
-	
+		if was_previous_move_wrong and self.training:
+			self.rollouts.store(Trajectory(self.parser.parse(game_state), self.previous_action, -100, last_prob))
+   
+		act = super().make_move(game_state, was_previous_move_wrong)
 		return act
  
 	def get_action(self, state, invalid_actions: Optional[List[int]] = None):

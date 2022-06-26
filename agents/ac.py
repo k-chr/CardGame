@@ -1,4 +1,4 @@
-from torch import nn
+from torch import nn, norm
 import torch as t
 import numpy as np
 from typing import List, Any, Dict, Optional
@@ -11,10 +11,8 @@ from . import Agent
 class ACAgent(nn.Module, Agent):
 	def __init__(self,
 				 full_deck,
-				 state_size,
 				 actor_learning_rate,
 				 critic_learning_rate,
-				 parser: StateParser =HeartsStateParser(),
 				 gamma=0.99,
 				 loss_decay = 0.99995,
 				 critic_layers: List[int]=[],
@@ -31,18 +29,20 @@ class ACAgent(nn.Module, Agent):
 		nn.Module.__init__(self)
 		Agent.__init__(self, full_deck, (actor_learning_rate, critic_learning_rate), 0.0, gamma, rng)
   
-		self.parser = parser
-		self.state_size = state_size
-		self.action_size = 13 if full_deck else 6
+		self.parser = HeartsStateParser(full_deck)
+		self.episode_losses_actor = []
+		self.episode_losses_critic = []
+		self.state_size = self.parser.state_len
+		self.action_size = 13 * 4 if full_deck else 6 * 4
 		self.loss_decay = loss_decay
 		activations_actor = [activation] * (len(actor_layers))
 		activations_actor.append('')
-		actor_layers: List[int] = [state_size] + actor_layers
+		actor_layers: List[int] = [self.state_size] + actor_layers
 		actor_layers.append(self.action_size)
-  
+		self.losses = []
 		activations_critic = [activation] * (len(critic_layers))
 		activations_critic.append('')
-		critic_layers: List[int] = [state_size] + critic_layers
+		critic_layers: List[int] = [self.state_size] + critic_layers
 		critic_layers.append(1)
   
 		self.actor = self._build_model(actor_layers, activations_actor, initializer, initializer_params)
@@ -76,7 +76,23 @@ class ACAgent(nn.Module, Agent):
 				Initializers.get('const')(module.bias, val=0)
 
 		return qnet
-	
+
+	def set_temp_reward(self, discarded_cards: dict, point_deltas: dict):	
+		super().set_temp_reward(discarded_cards, point_deltas)
+
+	def set_final_reward(self, points: dict):
+		super().set_final_reward(points)
+		a_loss, c_loss = self.learn(self.previous_state, self.previous_action, -self.current_reward, self.parser.fixed_terminal_state(), True)
+		self.episode_losses_actor.append(a_loss)
+		self.episode_losses_critic.append(c_loss)
+		# TODO sth with points in total.
+		actor_loss = np.mean(self.episode_losses_actor)
+		critic_loss = np.mean(self.episode_losses_critic)
+		self.episode_losses_actor.clear()
+		self.episode_losses_critic.clear()
+		self.losses.append((actor_loss, critic_loss))
+		self.loss_callback((actor_loss, critic_loss))
+  
 	def forward(self, state:t.Tensor):
 		return self.actor(state.to(self.learning_device)), self.critic(state.to(self.learning_device))
 	
@@ -88,7 +104,7 @@ class ACAgent(nn.Module, Agent):
 		possible_actions = set(range(0, self.action_size))
   
 		if invalid_actions: possible_actions -= set(invalid_actions)
-  
+		possible_actions = list(possible_actions)
 		with t.no_grad():
 			self.eval()
 			logits: t.Tensor = self(state)[0].cpu().squeeze(0).gather(0, t.as_tensor(possible_actions))
@@ -111,23 +127,41 @@ class ACAgent(nn.Module, Agent):
 		#
 		# INSERT CODE HERE to get action in a given state
 		# 
+
+  
+		if self.previous_state:
+
+			a_loss, c_loss = self.learn(self.previous_state, self.previous_action, -self.current_reward, state, False)
+			self.episode_losses_actor.append(a_loss)
+			self.episode_losses_critic.append(c_loss)
+ 
 		logits: t.Tensor
 		raw_state = state
 		state: t.Tensor =self.parser.parse(state)
 		possible_actions = possible_actions = set(range(0, self.action_size))
   
 		if invalid_actions: possible_actions -= set(invalid_actions)
-
+		possible_actions = list(possible_actions)
+		self.last_possible_actions = possible_actions
 		with t.no_grad():
 			self.eval()
 			logits = self(state)[0].cpu().squeeze(0)
-			probs: t.Tensor = t.softmax(logits, dim=0)		
-		probs_gathered: np.ndarray = probs.gather(0, t.as_tensor(possible_actions)).numpy().flatten() +1e-8
+			probs: t.Tensor = t.softmax(logits, dim=0)	
+		self.train()
+		probs_gathered: np.ndarray = probs.gather(0, t.as_tensor((possible_actions))).numpy().flatten() +1e-8
 		probs_gathered = probs_gathered/probs_gathered.sum()
 		action = self.rng.choice(possible_actions, p=probs_gathered)
-		self.last_prob = probs[action].item()
+		self.last_prob = probs[action]
 		
 		return action
+
+	def make_move(self, game_state: dict, was_previous_move_wrong: bool):		
+
+		if was_previous_move_wrong:
+			self.current_reward = 100
+   
+		act = super().make_move(game_state, was_previous_move_wrong)
+		return act
 
 	def learn(self, state, action, reward, next_state, done):
 		"""
@@ -147,21 +181,26 @@ class ACAgent(nn.Module, Agent):
 		reward = reward
 		gamma = (self.gamma)
 		
-		value = self.critic(state.to(self.learning_device)).cpu()
-		next_value = self.critic(next_state.to(self.learning_device)).cpu() if not done else t.zeros(1)
-		delta = (reward + gamma * next_value.item() - value.item())
-		critic_loss: t.Tensor =  F.smooth_l1_loss (value.flatten(), reward + gamma * next_value.flatten())
-		critic_loss *= self.I
-		log_prob: t.Tensor = t.log_softmax(self.actor(state.to(self.learning_device)), dim=1).cpu().flatten().gather(0, t.as_tensor([action], dtype=t.int64))
-		actor_loss: t.Tensor = - log_prob * delta
-		actor_loss *= self.I
+		value = self.critic(state.to(self.learning_device))
+		next_value = self.critic(next_state.to(self.learning_device)) if not done else t.zeros(1).to(self.learning_device)
+		delta = (reward + gamma * next_value - value)
+		
+		critic_loss: t.Tensor =  F.smooth_l1_loss (value.flatten(), reward + gamma * next_value.flatten()) * self.I
+		logits = self.actor(state.to(self.learning_device)).squeeze(0)
+		probs: t.Tensor = (t.softmax(logits, dim=0)) + 1e-8
+		normalized_probs = probs/probs.sum()
+		log_prob: t.Tensor = t.log(normalized_probs.gather(0, t.as_tensor([action], dtype=t.int64).to(self.learning_device)))
+		actor_loss: t.Tensor = (-log_prob * delta) * self.I
+		
+		
 		self.actor_optimizer.zero_grad()
 		actor_loss.backward(retain_graph=True)
-
 		self.actor_optimizer.step()
-		
+  
 		self.critic_optimizer.zero_grad()
 		critic_loss.backward()
 		self.critic_optimizer.step()
+  
 		self.I *= self.loss_decay
+  
 		return -actor_loss.detach().item(), critic_loss.detach().item()
