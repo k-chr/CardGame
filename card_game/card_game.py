@@ -109,6 +109,7 @@ class CardGame:
         """
         for _ in range(11):
             points_old = self.state["points"].copy()
+            shuffle(self.players)
             for _ in range(13 if self.full_deck else 6):
                 for player in self.players:
 

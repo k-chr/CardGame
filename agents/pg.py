@@ -120,6 +120,7 @@ class REINFORCEAgent(nn.Module, Agent):
 			self.eval()
 			logits: t.Tensor = self(state).cpu().squeeze(0)
 			probs: t.Tensor = t.softmax(logits, dim=0)
+		self.train()
 		possible_actions = list(possible_actions)
 		probs_gathered: np.ndarray = probs.gather(0, t.as_tensor((possible_actions))).numpy().flatten() +1e-8
 		probs_gathered = probs_gathered/probs_gathered.sum()
@@ -160,7 +161,8 @@ class REINFORCEAgent(nn.Module, Agent):
 		
 		batch_size = self.batch_size
 		trajectories = self.rollouts.get(list(range(len(self.rollouts))))
-		rewards = cumulative_rewards(self.gamma, trajectories.reward)
+
+		rewards = cumulative_rewards(self.gamma, trajectories.reward[:-1] + (-self.current_reward, ))
 		trajectories = Trajectory(trajectories.state, trajectories.action,  tuple(rewards), trajectories.prob)
 		self.rollouts.set_items(list(zip(*trajectories)))
 		if self.importance_weighting:
@@ -172,7 +174,7 @@ class REINFORCEAgent(nn.Module, Agent):
 		batch_size = min(count_mem, batch_size)
 		
 		batch = mem.sample(batch_size)
-		states = t.stack(batch.state).to(self.learning_device)
+		states = t.stack(batch.state).to(self.learning_device).squeeze(1)
 		actions = t.as_tensor(batch.action, dtype=t.int64, device=self.learning_device).unsqueeze(1)
 		rewards = t.as_tensor(batch.reward, device=self.learning_device).unsqueeze(1)
 		probs = t.as_tensor(batch.prob, device=self.learning_device).unsqueeze(1)
@@ -184,12 +186,13 @@ class REINFORCEAgent(nn.Module, Agent):
 			importance_weight = (current_policy_a + 1e-8) / (probs + 1e-8)
    
 		self.train()
-		predicted: t.Tensor = t.log_softmax(self(states), dim=1).gather(1, actions)
+		predicted_probs = t.softmax(self(states), dim=1) + 1e-8
+		predicted: t.Tensor = t.log(predicted_probs).gather(1, actions)
 		
 		loss = -predicted * importance_weight * rewards
-		loss = t.sum(loss)
+		loss = t.mean(loss)
 		self.optimizer.zero_grad()
 		loss.backward()
 		self.optimizer.step()
 		self.rollouts.clear()
-		return loss.cpu().item()
+		return -loss.cpu().item()

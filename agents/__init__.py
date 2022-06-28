@@ -42,6 +42,7 @@ class Agent(Player, ABC):
 		self.discarded_cards_so_far.clear()
 		self.invalid_actions_per_episode.append(self.cummulative_invalid_actions)
 		self.cummulative_invalid_actions = 0
+		self.current_reward = -200 if min(points.values()) == points[self] else 200
 		return super().set_final_reward(points)
 
 	def set_temp_reward(self, discarded_cards: dict, point_deltas: dict):
