@@ -5,8 +5,6 @@ import numpy as np
 import typing as t
 from matplotlib.axes import Axes
 
-
-
 class _Subplot:
     
     def __init__(self,
@@ -25,16 +23,17 @@ class _Subplot:
         self.y_lim = y_lim
 
     def update(self, feed_dict: t.Dict[str, t.Union[float, int]]):
-        
+        self.ax.cla()
         for key in feed_dict:
             self.buffers[key].append(feed_dict[key])
             
         for key, buffer in self.buffers.items():
             self.ax.plot(buffer, color=self.colors[key] if self.colors else None)
             
-        self.ax.legend(self.line_names)
-        self.ax.set_title(self.name)
+        self.ax.legend(self.line_names, bbox_to_anchor=(1,1,1,0), loc="upper left")
+        
         self.ax.set_xlabel(self.x_label)
+        self.ax.set_title(self.name, fontdict={'horizontalalignment':'right', 'fontweight':'normal', 'verticalalignment':'center'})
       
     def close(self): self.ax.clear()  
     
@@ -49,8 +48,10 @@ class LearningCurvePlot:
         loop: asyncio.AbstractEventLoop = None):
         
         self.loop = asyncio.get_event_loop() if not loop else loop
-        self.fig, self.axes = plt.subplots(nrows=len(plot_names), ncols=1, figsize=(12, 4*(len(plot_names))))
-        self.fig.tight_layout(h_pad=5)
+        self.fig, self.axes = plt.subplots(nrows=len(plot_names), ncols=1, figsize=(16, 4*(len(plot_names))), tight_layout=True)
+        self.fig.tight_layout(h_pad=5, w_pad=10)
+        self.fig.suptitle('Learning curve', fontsize=16)
+        
         plt.subplots_adjust(bottom=0.2, top=0.9)
         if not isinstance(self.axes, np.ndarray): self.axes=[self.axes]
         self.subplots = {name:_Subplot(name, 
@@ -63,7 +64,7 @@ class LearningCurvePlot:
                                                                                                      self.axes)}
         
     async def __update(self, feed_dict: t.Dict[str, t.Dict[str, t.Union[float, int]]]):
-        plt.cla()
+        
         for key in feed_dict:
             self.subplots[key].update(feed_dict[key])
             
