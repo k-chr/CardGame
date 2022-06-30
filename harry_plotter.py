@@ -10,7 +10,6 @@ class _Subplot:
                  name: str,
                  line_names: t.List[str],
                  x_label: str,
-                 y_lim: t.Tuple[float, float],
                  ax: Axes,
                  line_color: t.Optional[t.List[str]] = None) -> None:
         self.name = name
@@ -21,8 +20,6 @@ class _Subplot:
         self.first_update: t.Dict[str, bool]= {name:True for name in line_names}
         self.colors = {name:color for name, color in zip(line_names, line_color)} if line_color else None
         self.x_label = x_label 
-        self.y_lim = y_lim
-        
         self.lines: t.Dict[str, Line2D] = {key: self.ax.plot(self.x[key], buffer, color=self.colors[key] if self.colors else None)[0] for key, buffer in self.buffers.items()}
         self.ax.legend(self.line_names, bbox_to_anchor=(1,1,1,0), loc="upper left")
         self.ax.set_xlabel(self.x_label)
@@ -33,18 +30,17 @@ class _Subplot:
             if self.first_update[key]:
                 self.first_update[key] = False
                 self.buffers[key].clear()
+                self.x[key].clear()
                 
             self.buffers[key].append(feed_dict[key])
-            
+            self.x[key].append(len(self.x[key]))
         for key, buffer in self.buffers.items():
             line = self.lines[key]
             line.set_data(self.x[key], buffer)
-        
+
         self.ax.relim()
         
         self.ax.autoscale_view()
-        for _, x in self.x.items():
-            x.append(x[-1] + 1)
             
     def close(self): self.ax.clear()  
     
@@ -54,7 +50,6 @@ class LearningCurvePlot:
         plot_names=["plot"],
         line_names: t.Union[t.List[str],t.Dict[str, t.List[str]]]=["line-1"],
         line_colors: t.Optional[t.Dict[str, t.List[str]]]=None,
-        y_lim=[None, None],
         x_label: t.Union[str, t.List[str]] ="iteration"):
         self.fig, self.axes = plt.subplots(nrows=len(plot_names), ncols=1, figsize=(10, 4*(len(plot_names))), tight_layout=True)
         self.fig.tight_layout(h_pad=5, w_pad=10)
@@ -66,7 +61,6 @@ class LearningCurvePlot:
         self.subplots = {name:_Subplot(name, 
                                   line_names if not isinstance(line_names, dict) else line_names[name],
                                   x_label[i] if not isinstance(x_label, str) else x_label,
-                                  y_lim if not isinstance(y_lim, dict) else y_lim[name],
                                   ax,
                                   line_colors[name] if line_colors else None) for i, name, ax in zip(range(len(plot_names)),
                                                                                                      plot_names,
