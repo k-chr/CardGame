@@ -1,12 +1,13 @@
-from torch import nn, norm
+from torch import nn
 import torch as t
 import numpy as np
 from typing import List, Any, Dict, Optional
-from .training_helpers import Optimizers, Initializers, Activations
-from .utils import StateParser, HeartsStateParser
+from .training_helpers import Optimizers, build_model
+from .utils import HeartsStateParser
 from torch.nn import functional as F
 from numpy.random._generator import Generator, default_rng
-from . import Agent
+from torch.distributions import Categorical
+from . import Agent, INVALID_ACTION_PENALTY
 
 class ACAgent(nn.Module, Agent):
 	def __init__(self,
@@ -45,8 +46,8 @@ class ACAgent(nn.Module, Agent):
 		critic_layers: List[int] = [self.state_size] + critic_layers
 		critic_layers.append(1)
   
-		self.actor = self._build_model(actor_layers, activations_actor, initializer, initializer_params)
-		self.critic = self._build_model(critic_layers, activations_critic, initializer, initializer_params)
+		self.actor = build_model(actor_layers, activations_actor, initializer, initializer_params)
+		self.critic = build_model(critic_layers, activations_critic, initializer, initializer_params)
 
 		actor_optimizer_params.update(lr=actor_learning_rate)
 		self.actor_optimizer = Optimizers.get(actor_optimizer)(self.actor.parameters(), **actor_optimizer_params)
@@ -59,24 +60,6 @@ class ACAgent(nn.Module, Agent):
 		self = self.to(self.learning_device)
 		self.I =1
   
-	def _build_model(self, layers: List[int], activations: List[str], initializer: str, initializer_params={}):
-     
-		layer_init = lambda _in, _out, activation=None: nn.Sequential(
-			nn.Linear(_in, _out), Activations.get(activation)
-		)
-  
-		qnet = nn.Sequential(*[
-	 		layer_init(_in, _out, _activation) for _in, _out, _activation in zip(layers[:-1], layers[1:], activations)
-		])
-  
-	
-		for module in qnet.modules():
-			if isinstance(module, nn.Linear): 
-				Initializers.get(initializer)(module.weight, **initializer_params)
-				Initializers.get('const')(module.bias, val=0)
-
-		return qnet
-
 	def set_temp_reward(self, discarded_cards: dict, point_deltas: dict):	
 		super().set_temp_reward(discarded_cards, point_deltas)
 
@@ -91,11 +74,16 @@ class ACAgent(nn.Module, Agent):
 		self.episode_losses_actor.clear()
 		self.episode_losses_critic.clear()
 		self.losses.append((actor_loss, critic_loss))
-		self.loss_callback((actor_loss, critic_loss))
+		if self.loss_callback:
+			self.loss_callback((actor_loss, critic_loss))
   
 	def forward(self, state:t.Tensor):
 		return self.actor(state.to(self.learning_device)), self.critic(state.to(self.learning_device))
 	
+	@property
+	def algorithm_name(self) -> str:
+		return 'OSAC'	
+ 
 	def get_name(self) -> str:
 		return super().get_name() + " - Actor-Critic"
  
@@ -136,7 +124,6 @@ class ACAgent(nn.Module, Agent):
 			self.episode_losses_critic.append(c_loss)
  
 		logits: t.Tensor
-		raw_state = state
 		state: t.Tensor =self.parser.parse(state)
 		possible_actions = possible_actions = set(range(0, self.action_size))
   
@@ -148,17 +135,20 @@ class ACAgent(nn.Module, Agent):
 			logits = self(state)[0].cpu().squeeze(0)
 			probs: t.Tensor = t.softmax(logits, dim=0)	
 		self.train()
-		probs_gathered: np.ndarray = probs.gather(0, t.as_tensor((possible_actions))).numpy().flatten() +1e-8
+		possible_actions = list(possible_actions)
+		probs_gathered: np.ndarray = probs.gather(0, t.as_tensor((possible_actions))) +1e-8
 		probs_gathered = probs_gathered/probs_gathered.sum()
-		action = self.rng.choice(possible_actions, p=probs_gathered)
-		self.last_prob = probs[action]
+		dist = Categorical(probs_gathered)
+		idx = dist.sample().item()
+		action = possible_actions[idx]
+		self.last_prob = probs_gathered[idx].item()
 		
 		return action
 
 	def make_move(self, game_state: dict, was_previous_move_wrong: bool):		
 
 		if was_previous_move_wrong:
-			self.current_reward = 100
+			self.current_reward = INVALID_ACTION_PENALTY
    
 		act = super().make_move(game_state, was_previous_move_wrong)
 		return act

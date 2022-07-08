@@ -1,10 +1,12 @@
 from copy import deepcopy
 from card_game import Player, Card
-from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod, abstractproperty
 from typing import Callable, Any, List, Optional
 from numpy.random._generator import default_rng, Generator
 from .utils import small_deck, full_deck
 import torch as t
+
+INVALID_ACTION_PENALTY = 1000
 
 class Agent(Player, ABC):
 	def __init__(self, full_deck: bool, alpha: float, epsilon: float, gamma: float, rng: Generator =default_rng(2137)):
@@ -41,11 +43,14 @@ class Agent(Player, ABC):
  
 	def get_name(self) -> str:
 		return "Różowe Jednorożce"
+	
+	@abstractproperty
+	def algorithm_name(self)->str:...
  
 	def set_final_reward(self, points: dict):
 		self.discarded_cards_so_far.clear()
 		self.invalid_actions_per_episode.append(self.cummulative_invalid_actions)
-		if self.training: self.invalid_actions_callback(self.cummulative_invalid_actions)
+		if self.training and self.invalid_actions_callback: self.invalid_actions_callback(self.cummulative_invalid_actions)
 		self.cummulative_invalid_actions = 0
 		self.current_reward = -200 if min(points.values()) == points[self] else 200
 		return super().set_final_reward(points)
@@ -74,4 +79,3 @@ class Agent(Player, ABC):
 
 from .pg import REINFORCEAgent
 from .ac import ACAgent
-	

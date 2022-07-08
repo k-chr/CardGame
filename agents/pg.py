@@ -2,29 +2,36 @@ from torch import nn
 import torch as t
 import numpy as np
 from typing import List, Any, Dict, Optional
-from .utils import HeartsStateParser, Memory, Trajectory, StateParser, cumulative_rewards
-from .training_helpers import Optimizers, Initializers, Activations
-from . import Agent
+from .utils import HeartsStateParser, Memory, Trajectory, cumulative_rewards, normalize
+from .training_helpers import Optimizers, build_model
+from . import INVALID_ACTION_PENALTY, Agent
+from torch.distributions import Categorical
 from numpy.random._generator import Generator, default_rng
+from torch.nn import functional as F
+
 
 class REINFORCEAgent(nn.Module, Agent):
 	def __init__(self, 
 				 batch_size: int,
 				 full_deck,
 				 learning_rate,
+				 baseline_learning_rate,
 				 gamma = 0.95,
 				 importance_weighting = False,
 				 queue_size = 2000,
 				 layers: List[int] =[],
+				 baseline_layers: List[int] = [],
 				 rng: Generator =default_rng(2137),
 				 optimizer='adam',
+				 baseline_optimizer='adam',
 				 optimizer_params: Dict[str, Any] = {},
+				 baseline_optimizer_params: Dict[str, Any] ={},
 				 activation='relu',
 				 initializer='xavier_u',
 				 initializer_params: Dict[str, Any] = {}):
 	 
 		nn.Module.__init__(self)
-		Agent.__init__(self, full_deck, learning_rate, 0.0, gamma, rng)
+		Agent.__init__(self, full_deck, (learning_rate, baseline_learning_rate), 0.0, gamma, rng)
 		parser = HeartsStateParser(full_deck)
 		self.batch_size = batch_size
 		state_size = parser.state_len
@@ -32,33 +39,30 @@ class REINFORCEAgent(nn.Module, Agent):
 		self.parser = parser
 		self.state_size = state_size
 		self.action_size = 13 * 4 if full_deck else 6 * 4
+  
 		self.rollouts = Memory[Trajectory](None, Trajectory)
 		self.memory = Memory[Trajectory](queue_size, Trajectory) if importance_weighting else None 
+  
 		self.last_prob: float = 0.0
 		self.importance_weighting = importance_weighting
   
-		layer_init = lambda _in, _out, activation=None: nn.Sequential(
-			nn.Linear(_in, _out), Activations.get(activation)
-		)
-  
 		activations = [activation] * (len(layers))
 		activations.append('')
-		print(state_size, self.action_size)
+		activations_baseline = [activation] * (len(baseline_layers))
+		activations_baseline.append('')
+  
 		layers: List[int] = [state_size] + layers
 		layers.append(self.action_size)
+		baseline_layers: List[int] = [state_size] + baseline_layers
+		baseline_layers.append(1)
   
-		self.qnet = nn.Sequential(*[
-	 		layer_init(_in, _out, _activation) for _in, _out, _activation in zip(layers[:-1], layers[1:], activations)
-		])
-  
-		for module in self.modules():
-			if isinstance(module, nn.Linear): 
-				Initializers.get(initializer)(module.weight, **initializer_params)
-				Initializers.get('const')(module.bias, val=0)
-	
+		self.qnet = build_model(layers, activations, initializer, initializer_params)
+		self.baseline = build_model(baseline_layers, activations_baseline, initializer, initializer_params)
+
 		optimizer_params.update(lr=self.alpha)
-  
 		self.optimizer = Optimizers.get(optimizer)(self.qnet.parameters(), **optimizer_params)
+		baseline_optimizer_params.update(lr=baseline_learning_rate)
+		self.baseline_optimizer = Optimizers.get(baseline_optimizer)(self.baseline.parameters(), **baseline_optimizer_params)
   
 		self.learning_device = "cuda" if t.cuda.is_available() else 'cpu'
 		self.eval_device = 'cpu'
@@ -76,8 +80,12 @@ class REINFORCEAgent(nn.Module, Agent):
 		if not self.training: return
 		loss = self.replay()
 		self.losses.append(loss)
-		self.loss_callback(loss)
+		if self.loss_callback:
+			self.loss_callback(loss)
 	
+	@property 
+	def algorithm_name(self) -> str:
+		return 'REINFORCE'
  
 	def remember(self, state, action, reward):
 		if not isinstance(state, t.Tensor): state= self.parser.parse(state)
@@ -95,7 +103,7 @@ class REINFORCEAgent(nn.Module, Agent):
 		
 
 		if was_previous_move_wrong and self.training:
-			self.rollouts.store(Trajectory(self.parser.parse(game_state), self.previous_action, -100, last_prob))
+			self.rollouts.store(Trajectory(self.parser.parse(game_state), self.previous_action, -INVALID_ACTION_PENALTY, last_prob))
    
 		act = super().make_move(game_state, was_previous_move_wrong)
 		return act
@@ -120,12 +128,15 @@ class REINFORCEAgent(nn.Module, Agent):
 			self.eval()
 			logits: t.Tensor = self(state).cpu().squeeze(0)
 			probs: t.Tensor = t.softmax(logits, dim=0)
+   
 		self.train()
 		possible_actions = list(possible_actions)
-		probs_gathered: np.ndarray = probs.gather(0, t.as_tensor((possible_actions))).numpy().flatten() +1e-8
+		probs_gathered: np.ndarray = probs.gather(0, t.as_tensor((possible_actions))) +1e-8
 		probs_gathered = probs_gathered/probs_gathered.sum()
-		action = self.rng.choice(possible_actions, p=probs_gathered)
-		self.last_prob = probs[action].item()
+		dist = Categorical(probs_gathered)
+		idx = dist.sample().item()
+		action = possible_actions[idx]
+		self.last_prob = probs_gathered[idx].item()
 		
 		return action
 
@@ -163,6 +174,7 @@ class REINFORCEAgent(nn.Module, Agent):
 		trajectories = self.rollouts.get(list(range(len(self.rollouts))))
 
 		rewards = cumulative_rewards(self.gamma, trajectories.reward[:-1] + (-self.current_reward, ))
+		
 		trajectories = Trajectory(trajectories.state, trajectories.action,  tuple(rewards), trajectories.prob)
 		self.rollouts.set_items(list(zip(*trajectories)))
 		if self.importance_weighting:
@@ -184,15 +196,28 @@ class REINFORCEAgent(nn.Module, Agent):
 			current_policy: t.Tensor = t.softmax(self(states), dim=1)
 			current_policy_a = current_policy.gather(1, actions)
 			importance_weight = (current_policy_a + 1e-8) / (probs + 1e-8)
+			values = self.baseline(states)
    
 		self.train()
+  
+		advantage = rewards - values
+		advantage = normalize(advantage)
 		predicted_probs = t.softmax(self(states), dim=1) + 1e-8
-		predicted: t.Tensor = t.log(predicted_probs).gather(1, actions)
+		predicted_probs = predicted_probs/predicted_probs.sum()
+		dist = Categorical(predicted_probs)
+		predicted: t.Tensor = dist.log_prob(actions)
 		
-		loss = -predicted * importance_weight * rewards
+		loss = -predicted * importance_weight * advantage
 		loss = t.mean(loss)
+		baseline_loss = F.smooth_l1_loss(self.baseline(states), rewards)
+  
 		self.optimizer.zero_grad()
 		loss.backward()
 		self.optimizer.step()
+  
+		self.baseline_optimizer.zero_grad()
+		baseline_loss.backward()
+		self.baseline_optimizer.step()
+  
 		self.rollouts.clear()
-		return -loss.cpu().item()
+		return -loss.cpu().item(), baseline_loss.cpu().item()
