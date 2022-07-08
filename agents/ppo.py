@@ -5,82 +5,11 @@ import torch as t
 import numpy as np
 from typing import List, Any, Dict, Optional, Tuple
 from .utils import HeartsStateParser, Memory, Trajectory, cummulative_rewards_gae, normalize
-from .training_helpers import Optimizers, build_model
+from .training_helpers import Optimizers, build_model, Worker
 from torch.distributions import Categorical
 from numpy.random._generator import Generator, default_rng
 
 CLIP_EPSILON = 0.1
-
-class _PPOWorker(nn.Module, Agent):
-    def __init__(self, policy: nn.Module, critic: nn.Module, lambda_gae, gamma, action_size, parser: HeartsStateParser, callback):
-        nn.Module.__init__(self)
-        Agent.__init__(self, False, 0.0, 0.0, gamma, None)
-        self.policy = policy
-        self.critic = critic
-        self.lambda_gae = lambda_gae
-        self.gamma = gamma
-        self.rollouts = Memory[Trajectory](None, Trajectory)
-        self.parser = parser
-        self.callback = callback
-        self.training = True
-        self.action_size = action_size
-        self.last_prob = 0.0
-        self.last_val = 0.0
-        self.learning_device = "cuda" if t.cuda.is_available() else 'cpu'
-        
-    def get_action(self, state: Any, invalid_actions: Optional[List[int]] =None):
-
- 
-        logits: t.Tensor
-        state: t.Tensor =self.parser.parse(state)
-        possible_actions = possible_actions = set(range(0, self.action_size))
-  
-        if invalid_actions: possible_actions -= set(invalid_actions)
-        possible_actions = list(possible_actions)
-        self.last_possible_actions = possible_actions
-        with t.no_grad():
-            self.eval()
-            logits, value = self(state)
-            logits = logits.cpu().squeeze(0)
-            probs: t.Tensor = t.softmax(logits, dim=0)	
-        
-        self.train()
-        possible_actions = list(possible_actions)
-        probs_gathered: np.ndarray = probs.gather(0, t.as_tensor((possible_actions))) +1e-8
-        probs_gathered = probs_gathered/probs_gathered.sum()
-        dist = Categorical(probs_gathered)
-        idx = dist.sample().item()
-        action = possible_actions[idx]
-        self.last_prob = probs_gathered[idx].item()
-        self.last_val = value.item()
-        return action
-    
-    def get_best_action(self, state, invalid_actions: Optional[List[int]] =None): return self.get_action(state, invalid_actions)
-    
-    @property 
-    def algorithm_name(self) -> str:
-        return 'PPO'
-    
-    def get_name(self) -> str:
-        return super().get_name() + " - PPO-worker"
-    
-    def remember(self, state, action, reward):
-        if not isinstance(state, t.Tensor): state= self.parser.parse(state)
-        #Function adds information to the memory about last action and its results
-        self.rollouts.store(Trajectory(state, action, reward, self.last_prob, value=self.last_val))
-    
-    def set_temp_reward(self, discarded_cards: dict, point_deltas: dict):	
-        super().set_temp_reward(discarded_cards, point_deltas)
-        if not self.training: return
-  
-        self.remember(self.parser.parse(self.previous_state), self.previous_action, -self.current_reward)
-
-    def set_final_reward(self, points: dict):
-        super().set_final_reward(points)
-        self.callback(self)
-        
-    def forward(self, state:t.Tensor) -> Tuple[t.Tensor, t.Tensor]:
-        return self.policy(state.to(self.learning_device)), self.critic(state.to(self.learning_device))   
         
 class PPOAgent(nn.Module, Agent):
     def __init__(self, 
@@ -130,7 +59,7 @@ class PPOAgent(nn.Module, Agent):
         self.critic_optimizer = Optimizers.get(critic_optimizer)(self.critic.parameters(), **critic_optimizer_params)
         self.learning_device = "cuda" if t.cuda.is_available() else 'cpu'
         self.eval_device = 'cpu'
-        self.workers: List[_PPOWorker] = []
+        self.workers: List[Worker] = []
         self.served = False
         self.lambda_gae = lambda_gae
         self.entropy_coeff = entropy_coeff
@@ -156,7 +85,7 @@ class PPOAgent(nn.Module, Agent):
                 self.loss_callback((a_loss, c_loss)) 
     
     def spawn_worker(self) -> Agent:
-        w = _PPOWorker(self.actor, self.critic, self.lambda_gae, self.gamma, self.action_size, self.parser, self._worker_callback)
+        w = Worker(self.actor, self.critic, self.action_size, self.parser, self._worker_callback)
         self.workers.append(w)
         self.workers_served[w] = False
         return w    
@@ -225,7 +154,7 @@ class PPOAgent(nn.Module, Agent):
         # TODO sth with points in total.
         if not self.training: return
         self.served = True
-        if self.served and all(list(self.workers_served.values())):
+        if self.served and (not self.workers or all(list(self.workers_served.values()))):
             a_loss, c_loss = self.replay()
             self.losses.append((a_loss, c_loss))
             if self.loss_callback:
@@ -297,7 +226,7 @@ class PPOAgent(nn.Module, Agent):
             predicted_probs = predicted_probs/predicted_probs.sum()
             current_policy_a = predicted_probs.gather(1, actions)
             importance_weight = (t.log(current_policy_a) - t.log(probs + 1e-8)).exp()
-            dist = Categorical(predicted_probs)
+            dist = Categorical(current_policy_a)
             entropy: t.Tensor = dist.entropy()
 
             clipped = advantage * importance_weight.clamp(1 - CLIP_EPSILON, 1 + CLIP_EPSILON)
@@ -325,4 +254,4 @@ class PPOAgent(nn.Module, Agent):
             worker.rollouts.clear()
             self.workers_served[worker] = False
         
-        return np.mean(actor_losses), np.mean(critic_losses)
+        return -np.mean(actor_losses), np.mean(critic_losses)

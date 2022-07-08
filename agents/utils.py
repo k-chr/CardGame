@@ -26,7 +26,7 @@ def get_legal_actions(game: CardGame, agent, state):
     legit_hand = [card for card in hand if game._CardGame_validate(agent, card)]
     return legit_hand
 
-def cumulative_rewards(gamma, rewards):
+def cummulative_rewards(gamma, rewards):
     l = len(rewards)
     G = [0 for _ in range(l)]
     r_t_1 = 0
