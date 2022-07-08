@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Any, List, Callable, Dict, NamedTuple, Type, Union, Generic, TypeVar, Deque
 import torch as t
 import numpy as np
@@ -11,13 +12,15 @@ suits = ['Clovers', 'Diamonds', 'Hearts', 'Spades']
 
 small_deck = [Card(suits[j], ranks[i]) for i in range(7, 13) for j in range(4)]
 full_deck = [Card(suits[j], ranks[i]) for i in range(0, 13) for j in range(4)]
-
+    
 class Trajectory(NamedTuple):
     state: Union[t.Tensor, List[t.Tensor]]
     action: Union[int, List[int]]
     reward: Union[float, List[float]]
     prob: Union[float, List[float]]
-    
+    advantage: Union[float, List[float]] = None
+    value: Union[float, List[float]] = None
+        
 def get_legal_actions(game: CardGame, agent, state):
     hand = state['hand']
     legit_hand = [card for card in hand if game._CardGame_validate(agent, card)]
@@ -34,7 +37,11 @@ def cumulative_rewards(gamma, rewards):
         r_t_1 = r_t_1 * gamma + r_t
         G[t] = r_t_1
   
-    return np.asarray(G)
+    G = np.asarray(G)
+    return G
+
+def normalize(arr:np.ndarray):
+    return (arr-arr.mean())/(arr.std() + 1e-8)
 
 def cummulative_rewards_gae(gamma, gae_lambda, rewards, values):
     l = len(rewards)
@@ -87,9 +94,13 @@ class Memory(Generic[TRAJ]):
         memory = getter(self.__queue)
         batch:TRAJ = self.__trajectory_cls(*zip(*memory))
         return batch
+    
     def set_items(self, queue):
         self.clear()
         self.__queue = deque(queue, self._max_size)
+    
+    def cat(self, queue: Memory[TRAJ]):
+        [self.__queue.append(traj) for traj in queue]
  
     def clear(self):
         self.__queue.clear()	
