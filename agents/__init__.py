@@ -79,3 +79,4 @@ class Agent(Player, ABC):
 
 from .pg import REINFORCEAgent
 from .ac import ACAgent
+from .ppo import PPOAgent
