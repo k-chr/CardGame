@@ -2,7 +2,7 @@ from torch import nn
 import torch as t
 import numpy as np
 from typing import List, Any, Dict, Optional, Tuple
-from .utils import HeartsStateParser, Memory, Trajectory, cummulative_rewards, normalize
+from .utils import HeartsStateParser, Memory, Trajectory, cummulative_rewards, normalize, get_legal_actions
 from .training_helpers import Optimizers, build_model, Worker
 from . import INVALID_ACTION_PENALTY, Agent
 from torch.distributions import Categorical
@@ -108,7 +108,7 @@ class REINFORCEAgent(nn.Module, Agent):
     def remember(self, state, action, reward):
         if not isinstance(state, t.Tensor): state= self.parser.parse(state)
         #Function adds information to the memory about last action and its results
-        self.rollouts.store(Trajectory(state, action, reward, self.last_prob, self.last_val))
+        self.rollouts.store(Trajectory(state, action, reward, self.last_prob, None, self.last_val))
     
     def forward(self, state):
         return self.qnet(state.to(self.learning_device))
@@ -121,7 +121,7 @@ class REINFORCEAgent(nn.Module, Agent):
         
 
         if was_previous_move_wrong and self.training:
-            self.rollouts.store(Trajectory(self.parser.parse(game_state), self.previous_action, -INVALID_ACTION_PENALTY, last_prob, self.last_val))
+            self.rollouts.store(Trajectory(self.parser.parse(game_state), self.previous_action, -INVALID_ACTION_PENALTY, last_prob, None, self.last_val))
    
         act = super().make_move(game_state, was_previous_move_wrong)
         return act
@@ -136,11 +136,13 @@ class REINFORCEAgent(nn.Module, Agent):
         #
         # INSERT CODE HERE to get action in a given state
         # 
-        state: t.Tensor =self.parser.parse(state)
-        possible_actions = set(range(0, self.action_size))
+        possible_actions = get_legal_actions(state, not self.full_deck)
+        state: t.Tensor =self.parser.parse(state).to(self.learning_device)
+        
+        # possible_actions = set(range(0, self.action_size))
   
-        if invalid_actions:
-            possible_actions -= set(invalid_actions)
+        # if invalid_actions:
+        #     possible_actions -= set(invalid_actions)
 
         with t.no_grad():
             self.eval()
@@ -160,11 +162,13 @@ class REINFORCEAgent(nn.Module, Agent):
         return action
 
     def get_best_action(self, state, invalid_actions: Optional[List[int]] = None):
-        state: t.Tensor =self.parser.parse(state)
-        possible_actions = set(range(0, self.action_size))
+        possible_actions = get_legal_actions(state, not self.full_deck)
+        
+        state: t.Tensor =self.parser.parse(state).to(self.learning_device)
+        # possible_actions = set(range(0, self.action_size))
   
-        if invalid_actions:
-            possible_actions -= set(invalid_actions)
+        # if invalid_actions:
+        #     possible_actions -= set(invalid_actions)
 
         possible_actions = list(possible_actions)
 
@@ -193,7 +197,7 @@ class REINFORCEAgent(nn.Module, Agent):
         trajectories = self.rollouts.get(list(range(len(self.rollouts))))
 
         rewards = cummulative_rewards(self.gamma, trajectories.reward[:-1] + (-self.current_reward, ))
-        advantage = rewards - values
+        advantage = rewards - np.asarray(trajectories.value)
         advantage = normalize(advantage)
         rewards = normalize(rewards)
         trajectories = Trajectory(trajectories.state, trajectories.action,  tuple(rewards), trajectories.prob, tuple(advantage), trajectories.value)
@@ -210,7 +214,7 @@ class REINFORCEAgent(nn.Module, Agent):
             self.rollouts.cat(list(zip(*trajectories)))   
         
         if self.importance_weighting:
-            for tup in zip(trajectories.state, trajectories.action, trajectories.reward, trajectories.prob):
+            for tup in zip(trajectories.state, trajectories.action, trajectories.reward, trajectories.prob, trajectories.advantage, trajectories.value):
                 self.memory.store(tup)
         mem = self.memory if self.importance_weighting else self.rollouts
         count_mem = len(mem)
@@ -222,7 +226,7 @@ class REINFORCEAgent(nn.Module, Agent):
         actions = t.as_tensor(batch.action, dtype=t.int64, device=self.learning_device).unsqueeze(1)
         rewards = t.as_tensor(batch.reward, device=self.learning_device).unsqueeze(1)
         probs = t.as_tensor(batch.prob, device=self.learning_device).unsqueeze(1)
-   
+        advantage = t.as_tensor(batch.advantage, device=self.learning_device).unsqueeze(1)
         with t.no_grad():
             self.eval()
             current_policy: t.Tensor = t.softmax(self(states), dim=1)

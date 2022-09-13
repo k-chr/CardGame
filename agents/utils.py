@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, List, Callable, Dict, NamedTuple, Type, Union, Generic, TypeVar, Deque
+from typing import Any, List, Callable, Dict, NamedTuple, Set, Type, Union, Generic, TypeVar, Deque
 import torch as t
 import numpy as np
 from collections import deque
@@ -21,10 +21,19 @@ class Trajectory(NamedTuple):
     advantage: Union[float, List[float]] = None
     value: Union[float, List[float]] = None
         
-def get_legal_actions(game: CardGame, agent, state):
+def _get_legal_cards(state: Dict[str, List[Card]]) -> List[Card]:
     hand = state['hand']
-    legit_hand = [card for card in hand if game._CardGame_validate(agent, card)]
-    return legit_hand
+    if state["discard"]:
+            options = list(filter(lambda card: card.suit == list(state["discard"])[0].suit, hand))
+            if len(options) > 0:
+                return options
+    return hand
+
+def get_legal_actions(state: Dict[str, List[Card]], use_small_deck=True) -> Set[int]: return {card_to_id(card, use_small_deck) for card in _get_legal_cards(state)}
+
+def card_to_id(card: Card, use_small_deck=True):
+    collection = small_deck if use_small_deck else full_deck
+    return collection.index(card)
 
 def cummulative_rewards(gamma, rewards):
     l = len(rewards)
