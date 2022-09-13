@@ -68,7 +68,7 @@ class Agent(Player, ABC):
             self.invalid_actions_per_episode.append(self.cummulative_invalid_actions)
             if self.invalid_actions_callback: self.invalid_actions_callback(self.cummulative_invalid_actions)
             self.cummulative_invalid_actions = 0
-            self.current_reward = VICTORY_PENALTY if min(points.values()) == points[self] else -VICTORY_PENALTY
+            self.current_reward = -VICTORY_PENALTY if max(points.values()) == points[self] else VICTORY_PENALTY/(points[self]+1)
             if self.evaluate_callback and (self.eval_interval) % self.max_eval_interval == 0:
                 self.evaluate_callback()
                 self.eval_interval = 0
