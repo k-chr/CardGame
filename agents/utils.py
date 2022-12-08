@@ -29,7 +29,8 @@ def _get_legal_cards(state: Dict[str, List[Card]]) -> List[Card]:
                 return options
     return hand
 
-def get_legal_actions(state: Dict[str, List[Card]], use_small_deck=True) -> Set[int]: return {card_to_id(card, use_small_deck) for card in _get_legal_cards(state)}
+def get_legal_actions(state: Dict[str, List[Card]], use_small_deck=True) -> Set[int]: 
+    return {card_to_id(card, use_small_deck) for card in _get_legal_cards(state)}
 
 def card_to_id(card: Card, use_small_deck=True):
     collection = small_deck if use_small_deck else full_deck
